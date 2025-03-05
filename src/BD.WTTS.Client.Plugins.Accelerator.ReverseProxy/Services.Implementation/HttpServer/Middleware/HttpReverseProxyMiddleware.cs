@@ -143,8 +143,8 @@ Actual value was {actualValue}.
                 SetWattHeaders(context, reverseProxyConfig.Service.ServerSideProxyToken);
                 forwarderRequestConfig = new ForwarderRequestConfig()
                 {
-                    Version = GetHttpVersion(context.Request.Protocol),
-                    VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher
+                    Version = HttpVersion.Version30,
+                    VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
                 };
             }
             else
