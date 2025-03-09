@@ -5,7 +5,17 @@ sealed partial class Program : Startup
 {
     static Program? instance;
 
-    public Program(string[]? args = null) : base(args) { }
+    public Program(string[]? args = null) : base(args)
+    {
+#if DEBUG
+        Console.WriteLine("args: ");
+        if (args != null)
+            foreach (var item in args)
+            {
+                Console.WriteLine(item);
+            }
+#endif
+    }
 
     protected override void ConfigureRequiredServices(IServiceCollection services)
     {
@@ -48,6 +58,7 @@ sealed partial class Program : Startup
         // Essentials
 #if LINUX
         services.TryAddSingleton<IApplicationVersionService, Essentials_AppVerS>();
+        services.AddSingleton<IDeviceInfoPlatformService, LinuxDeviceInfoPlatformServiceImpl>();
 #else
 #if WINDOWS
 #if AVALONIA
@@ -94,10 +105,14 @@ sealed partial class Program : Startup
             services.AddSingleton<IApplication>(s => s.GetRequiredService<App>());
 
             services.TryAddAvaloniaFilePickerPlatformService();
+#if LINUX
+            services.AddSingleton<IClipboardPlatformService, AvaloniaClipboardPlatformService>();
+#endif
 
-            #region MessageBox
+            #region WindowManager
 
             services.TryAddWindowManager();
+            services.TryAddNavigationService();
             services.TryToastService();
 
             #endregion
@@ -126,7 +141,7 @@ sealed partial class Program : Startup
 #endif
             // 通用 Http 服务
             Fusillade.NetCache.RequestCache = this;
-            services.AddSingleton<IHttpClientFactory>(new FusilladeHttpClientFactory());
+            services.AddFusilladeHttpClient();
             services.TryImageHttpClientService();
 #if STARTUP_WATCH_TRACE || DEBUG
             WatchTrace.Record("ConfigureDemandServices.HttpClientFactory");
@@ -185,7 +200,7 @@ sealed partial class Program : Startup
         WatchTrace.Record("ConfigureDemandServices.Notification");
 #endif
 
-        if (HasHosts)
+        if (HasHosts || HasIPCRoot)
         {
             // hosts 文件助手服务
             services.AddHostsFileService();
@@ -233,10 +248,34 @@ sealed partial class Program : Startup
 
     sealed class Essentials_AppVerS : IApplicationVersionService
     {
-        string IApplicationVersionService.ApplicationVersion => AssemblyInfo.Version;
+        string IApplicationVersionService.ApplicationVersion => AssemblyInfo.FileVersion;
 
         string IApplicationVersionService.AssemblyTrademark => AssemblyInfo.Trademark;
     }
+
+#if LINUX
+    sealed class LinuxDeviceInfoPlatformServiceImpl : IDeviceInfoPlatformService
+    {
+        public string Model => "";
+
+        public string Manufacturer => "";
+
+        public string Name => "";
+
+        public string VersionString => Environment.OSVersion.VersionString;
+
+        public DeviceType DeviceType => DeviceType.Physical;
+
+        public bool IsChromeOS => false;
+
+        public bool IsWinUI => false;
+
+        public bool IsUWP => false;
+
+        public DeviceIdiom Idiom => DeviceIdiom.Desktop;
+    }
+
+#endif
 
 #if AVALONIA && WINDOWS
     sealed class AvaWinDeviceInfoPlatformServiceImpl :
@@ -256,33 +295,42 @@ sealed partial class Program : Startup
 
     protected override ActiveUserRecordDTO GetActiveUserRecord()
     {
-#if !__MOBILE__ && !MAUI
-        var app = UI.App.Instance;
-        var window = app.GetFirstOrDefaultWindow();
-        var screens = window?.Screens;
-#else
-        var mainDisplayInfo = DeviceDisplay.MainDisplayInfo;
-        var mainDisplayInfoH = mainDisplayInfo.Height.ToInt32(NumberToInt32Format.Ceiling);
-        var mainDisplayInfoW = mainDisplayInfo.Width.ToInt32(NumberToInt32Format.Ceiling);
-#endif
         var result = new ActiveUserRecordDTO
         {
-#if __MOBILE__ || MAUI
-            ScreenCount = 1,
-            PrimaryScreenPixelDensity = mainDisplayInfo.Density,
-            PrimaryScreenWidth = mainDisplayInfoW,
-            PrimaryScreenHeight = mainDisplayInfoH,
-            SumScreenWidth = mainDisplayInfoW,
-            SumScreenHeight = mainDisplayInfoH,
-#else
-            ScreenCount = screens?.ScreenCount ?? default,
-            PrimaryScreenPixelDensity = screens?.Primary?.Scaling ?? default,
-            PrimaryScreenWidth = screens?.Primary?.Bounds.Width ?? default,
-            PrimaryScreenHeight = screens?.Primary?.Bounds.Height ?? default,
-            SumScreenWidth = screens?.All.Sum(x => x.Bounds.Width) ?? default,
-            SumScreenHeight = screens?.All.Sum(x => x.Bounds.Height) ?? default,
-#endif
         };
+        SetScreen(result);
+        static void SetScreen(ActiveUserRecordDTO m)
+        {
+            try
+            {
+#if !__MOBILE__ && !MAUI
+                var app = UI.App.Instance;
+                var window = app.GetFirstOrDefaultWindow();
+                var screens = window?.Screens;
+
+                m.ScreenCount = screens?.ScreenCount ?? default;
+                m.PrimaryScreenPixelDensity = screens?.Primary?.Scaling ?? default;
+                m.PrimaryScreenWidth = screens?.Primary?.Bounds.Width ?? default;
+                m.PrimaryScreenHeight = screens?.Primary?.Bounds.Height ?? default;
+                m.SumScreenWidth = screens?.All?.Sum(x => x.Bounds.Width) ?? default;
+                m.SumScreenHeight = screens?.All?.Sum(x => x.Bounds.Height) ?? default;
+#else
+            var mainDisplayInfo = DeviceDisplay.MainDisplayInfo;
+            var mainDisplayInfoH = mainDisplayInfo.Height.ToInt32(NumberToInt32Format.Ceiling);
+            var mainDisplayInfoW = mainDisplayInfo.Width.ToInt32(NumberToInt32Format.Ceiling);
+
+            m.ScreenCount = 1;
+            m.PrimaryScreenPixelDensity = mainDisplayInfo.Density;
+            m.PrimaryScreenWidth = mainDisplayInfoW;
+            m.PrimaryScreenHeight = mainDisplayInfoH;
+            m.SumScreenWidth = mainDisplayInfoW;
+            m.SumScreenHeight = mainDisplayInfoH;
+#endif
+            }
+            catch
+            {
+            }
+        }
         return result;
     }
 }
